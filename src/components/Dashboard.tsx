@@ -25,7 +25,7 @@ export function Dashboard({ setActiveModule }: DashboardProps) {
   const [loading, setLoading] = useState(true);
   const [recentActivity, setRecentActivity] = useState<ActivityItem[]>([]);
   const [quizScores, setQuizScores] = useState<{ name: string; puntaje: number }[]>([]);
-  const [weeklyPoints, setWeeklyPoints] = useState<{ name: string; puntos: number }[]>([]);
+  const [chartData, setChartData] = useState<{ name: string; puntos: number }[]>([]);
   const [progress, setProgress] = useState<ProgressRow>({
     overall_progress: 0,
     average_score: 0,
@@ -40,188 +40,118 @@ export function Dashboard({ setActiveModule }: DashboardProps) {
         if (authErr) throw authErr;
         if (!user) { setLoading(false); return; }
 
-        /** 1) LEER INTENTOS (para barras y fallback promedio) */
-        const { data: attempts, error: attErr } = await supabase
-          .from('user_quiz_attempts')
-          .select('quiz_id, score, completed_at')
+        /** 1️⃣ LEER progreso actual */
+        const { data: progressRow } = await supabase
+          .from('user_progress')
+          .select('overall_progress, average_score, study_time, medals_count')
           .eq('user_id', user.id)
-          .order('completed_at', { ascending: true });
-        if (attErr) throw attErr;
+          .maybeSingle();
 
-        const avgFromAttempts =
-          attempts && attempts.length
-            ? Math.round(attempts.reduce((sum, a) => sum + (Number(a.score) || 0), 0) / attempts.length)
-            : 0;
+        setProgress({
+          overall_progress: progressRow?.overall_progress ?? 0,
+          average_score: progressRow?.average_score ?? 0,
+          study_time: progressRow?.study_time ?? 0,
+          medals_count: progressRow?.medals_count ?? 0,
+        });
 
-        const quizBars = (attempts ?? []).slice(-6).map((a, i) => ({
-          name: `Quiz ${Math.max(1, (attempts?.length ?? 0) - Math.min(5, (attempts?.length ?? 0) - 1) + i)}`,
-          puntaje: Number(a.score) || 0,
-        }));
-        setQuizScores(quizBars);
-
-        /** 2) ACTIVIDAD RECIENTE (primero intentamos activity_logs) */
-        const { data: actRows, error: actErr } = await supabase
+        /** 2️⃣ ACTIVIDAD RECIENTE */
+        const { data: actRows } = await supabase
           .from('activity_logs')
           .select('action,item,created_at,type')
           .eq('user_id', user.id)
           .order('created_at', { ascending: false })
           .limit(6);
-        if (actErr) throw actErr;
+        setRecentActivity(actRows ?? []);
 
-        let activity: ActivityItem[] = (actRows ?? []) as ActivityItem[];
-
-        /** 2b) Si no hay activity_logs suficientes, la reconstruimos desde quizzes y lecciones */
-        if (!activity || activity.length < 6) {
-          // ---- desde quizzes ----
-          const lastAttempts = (await supabase
-            .from('user_quiz_attempts')
-            .select('quiz_id, score, completed_at')
-            .eq('user_id', user.id)
-            .order('completed_at', { ascending: false })
-            .limit(10)
-          ).data ?? [];
-
-          const quizIds = Array.from(new Set(lastAttempts.map(a => a.quiz_id).filter(Boolean)));
-          const quizTitleById = new Map<string, string>();
-          if (quizIds.length) {
-            const quizzesLookup = (await supabase
-              .from('quizzes')
-              .select('id,title')
-              .in('id', quizIds as string[])
-            ).data ?? [];
-            quizzesLookup.forEach(q => quizTitleById.set(q.id, q.title));
-          }
-
-          const quizActivities: ActivityItem[] = lastAttempts.map(a => ({
-            action: `Completó el quiz "${quizTitleById.get(a.quiz_id as string) ?? a.quiz_id}" con ${a.score}%`,
-            item: null,
-            created_at: a.completed_at as string,
-            type: 'quiz',
-          }));
-
-          // ---- desde lecciones ----
-          const lastLessons = (await supabase
-            .from('user_lessons')
-            .select('lesson_id, completed, completed_at')
-            .eq('user_id', user.id)
-            .eq('completed', true)
-            .order('completed_at', { ascending: false })
-            .limit(10)
-          ).data ?? [];
-
-          const lessonIds = Array.from(new Set(lastLessons.map(l => l.lesson_id).filter(Boolean)));
-          const lessonTitleById = new Map<string, string>();
-          if (lessonIds.length) {
-            const lessonsLookup = (await supabase
-              .from('lessons')
-              .select('id,title')
-              .in('id', lessonIds as string[])
-            ).data ?? [];
-            lessonsLookup.forEach(l => lessonTitleById.set(l.id, l.title));
-          }
-
-          const lessonActivities: ActivityItem[] = lastLessons
-            .filter(l => l.completed_at)
-            .map(l => ({
-              action: `Completó la lección "${lessonTitleById.get(l.lesson_id as string) ?? l.lesson_id}"`,
-              item: null,
-              created_at: l.completed_at as string,
-              type: 'lesson',
-            }));
-
-          // Mezclar, ordenar por fecha desc y tomar 6
-          const merged = [...activity, ...quizActivities, ...lessonActivities]
-            .sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at))
-            .slice(0, 6);
-
-          activity = merged;
-        }
-
-        setRecentActivity(activity);
-
-        /** 3) FALLBACK de PROGRESO GENERAL desde lecciones */
-        const { count: totalLessons, error: totErr } = await supabase
-          .from('lessons')
-          .select('id', { count: 'exact', head: true });
-        if (totErr) throw totErr;
-
-        const { count: completedLessons, error: compErr } = await supabase
-          .from('user_lessons')
-          .select('id', { count: 'exact', head: true })
-          .eq('user_id', user.id)
-          .eq('completed', true);
-        if (compErr) throw compErr;
-
-        const overallFromLessons =
-          (totalLessons ?? 0) > 0
-            ? Math.round(((completedLessons ?? 0) / (totalLessons ?? 0)) * 100)
-            : 0;
-
-        /** 4) LEER/CREAR user_progress */
-        const { data: progressRow, error: progErr } = await supabase
-          .from('user_progress')
-          .select('overall_progress, average_score, study_time, medals_count')
-          .eq('user_id', user.id)
-          .maybeSingle();
-        if (progErr) throw progErr;
-
-        const mergedProgress: ProgressRow = {
-          overall_progress: (progressRow?.overall_progress ?? undefined) != null
-            ? progressRow!.overall_progress
-            : overallFromLessons,
-          average_score: (progressRow?.average_score ?? 0) || avgFromAttempts,
-          study_time: progressRow?.study_time ?? 0, // en MINUTOS
-          medals_count: progressRow?.medals_count ?? 0,
-        };
-
-        const needsUpsert =
-          !progressRow ||
-          (progressRow.overall_progress ?? 0) !== (mergedProgress.overall_progress ?? 0) ||
-          (progressRow.average_score ?? 0) !== (mergedProgress.average_score ?? 0);
-
-        if (needsUpsert) {
-          const { error: upErr } = await supabase
-            .from('user_progress')
-            .upsert(
-              {
-                user_id: user.id,
-                overall_progress: mergedProgress.overall_progress ?? 0,
-                average_score: mergedProgress.average_score ?? 0,
-                study_time: mergedProgress.study_time ?? 0,
-                medals_count: mergedProgress.medals_count ?? 0,
-                updated_at: new Date().toISOString(),
-              },
-              { onConflict: 'user_id' }
-            );
-          if (upErr) console.error('UPsert user_progress falló (revisa RLS):', upErr.message);
-        }
-
-        setProgress(mergedProgress);
-
-        /** 5) PROGRESO POR SEMANA (últimas 6) */
-        const now = new Date();
-        const SIX_WEEKS_MS = 6 * 7 * 24 * 60 * 60 * 1000;
-        const startRange = new Date(now.getTime() - SIX_WEEKS_MS);
-
-        const { data: lastAttemptsForWeeks } = await supabase
+        /** 3️⃣ ÚLTIMOS QUIZZES */
+        const { data: attempts } = await supabase
           .from('user_quiz_attempts')
           .select('score, completed_at')
           .eq('user_id', user.id)
-          .gte('completed_at', startRange.toISOString())
-          .lte('completed_at', now.toISOString());
+          .order('completed_at', { ascending: true });
 
-        const buckets: { name: string; puntos: number }[] = Array.from({ length: 6 }).map((_, i) => ({
-          name: `Sem ${i + 1}`,
-          puntos: 0,
+        const quizBars = (attempts ?? []).slice(-6).map((a, i) => ({
+          name: `Quiz ${i + 1}`,
+          puntaje: Number(a.score) || 0,
         }));
+        setQuizScores(quizBars);
 
-        (lastAttemptsForWeeks ?? []).forEach(a => {
-          const d = new Date(a.completed_at as string);
-          const diffW = Math.floor((now.getTime() - d.getTime()) / (7 * 24 * 60 * 60 * 1000)); // 0..5
-          const idx = Math.max(0, Math.min(5, 5 - diffW)); // más reciente a la derecha
-          buckets[idx].puntos += Number(a.score) || 0;
-        });
-        setWeeklyPoints(buckets);
+        /** 4️⃣ GRÁFICA DINÁMICA (diaria o semanal) */
+        const now = new Date();
+        const attemptsWithDates = (attempts ?? []).filter(a => a.completed_at);
+        if (attemptsWithDates.length === 0) {
+          setChartData([{ name: 'Sin datos', puntos: 0 }]);
+        } else {
+          const first = new Date(attemptsWithDates[0].completed_at);
+          const diffDays = Math.max(1, Math.ceil((now.getTime() - first.getTime()) / (1000 * 60 * 60 * 24)));
+
+          if (diffDays <= 7) {
+            // 🔹 Mostrar progreso diario
+            const buckets = Array.from({ length: diffDays }).map((_, i) => ({
+              name: `Día ${i + 1}`,
+              puntos: 0,
+            }));
+
+            attemptsWithDates.forEach(a => {
+              const d = new Date(a.completed_at);
+              const diff = Math.floor((d.getTime() - first.getTime()) / (1000 * 60 * 60 * 24));
+              buckets[diff].puntos += Number(a.score) || 0;
+            });
+            setChartData(buckets);
+          } else {
+            // 🔹 Mostrar progreso semanal
+            const weekCount = Math.ceil(diffDays / 7);
+            const buckets = Array.from({ length: weekCount }).map((_, i) => ({
+              name: `Sem ${i + 1}`,
+              puntos: 0,
+            }));
+
+            attemptsWithDates.forEach(a => {
+              const d = new Date(a.completed_at);
+              const diff = Math.floor((now.getTime() - d.getTime()) / (7 * 24 * 60 * 60 * 1000));
+              const idx = Math.max(0, Math.min(weekCount - 1, weekCount - 1 - diff));
+              buckets[idx].puntos += Number(a.score) || 0;
+            });
+            setChartData(buckets);
+          }
+        }
+
+        /** 5️⃣ REGISTRAR TIEMPO DE ESTUDIO (seguro al cerrar) */
+        const sessionStart = Date.now();
+        const handleUnload = async () => {
+          const sessionEnd = Date.now();
+          const mins = Math.round((sessionEnd - sessionStart) / 60000);
+          if (mins > 0) {
+            await supabase
+              .from('user_progress')
+              .update({
+                study_time: (progress.study_time ?? 0) + mins,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('user_id', user.id);
+          }
+        };
+        window.addEventListener('beforeunload', handleUnload);
+
+        /** 6️⃣ SUSCRIPCIÓN EN TIEMPO REAL */
+        const subscription = supabase
+          .channel('progress-changes')
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'user_progress' },
+            (payload: { new: any }) => {
+              const newRow = payload.new as Partial<ProgressRow> & { user_id?: string };
+              if (newRow.user_id === user.id) {
+                setProgress(newRow as ProgressRow);
+              }
+            }
+          )
+          .subscribe();
+
+        return () => {
+          window.removeEventListener('beforeunload', handleUnload);
+          supabase.removeChannel(subscription);
+        };
       } catch (e) {
         console.error('Error cargando dashboard:', e);
       } finally {
@@ -240,120 +170,58 @@ export function Dashboard({ setActiveModule }: DashboardProps) {
 
   if (loading) {
     return (
-      <div className="container mx-auto px-4 py-16">
-        <div className="text-slate-600">Cargando tu panel…</div>
-      </div>
+      <div className="container mx-auto px-4 py-16 text-slate-600">Cargando tu panel…</div>
     );
   }
 
   return (
     <div className="container mx-auto px-4 py-8">
+      {/* Encabezado */}
       <div className="mb-8">
-        <h1 style={{ color: '#1E293B', fontSize: '2.5rem', fontWeight: 700 }}>
-          ¡Bienvenido de vuelta!
-        </h1>
-        <p style={{ color: '#64748B', fontSize: '1.125rem', marginTop: '0.5rem' }}>
-          Continúa tu viaje de aprendizaje en metodologías ágiles
-        </p>
+        <h1 className="text-4xl font-bold text-slate-800">¡Bienvenido de vuelta!</h1>
+        <p className="text-lg text-slate-500 mt-2">Continúa tu viaje de aprendizaje </p>
       </div>
 
-      {/* Tarjetas */}
+      {/* Tarjetas principales */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <div className="bg-white rounded-xl p-6 border" style={{ borderColor: '#E2E8F0', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-          <div className="w-12 h-12 rounded-lg flex items-center justify-center mb-4" style={{ backgroundColor: '#DBEAFE' }}>
-            <Target className="w-6 h-6" style={{ color: '#3B82F6' }} />
-          </div>
-          <p className="text-sm mb-1" style={{ color: '#64748B' }}>Progreso General</p>
-          <p className="text-3xl" style={{ color: '#1E293B', fontWeight: 700 }}>
-            {Math.round(progress.overall_progress ?? 0)}%
-          </p>
-        </div>
-
-        <div className="bg-white rounded-xl p-6 border" style={{ borderColor: '#E2E8F0', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-          <div className="w-12 h-12 rounded-lg flex items-center justify-center mb-4" style={{ backgroundColor: '#D1FAE5' }}>
-            <TrendingUp className="w-6 h-6" style={{ color: '#10B981' }} />
-          </div>
-          <p className="text-sm mb-1" style={{ color: '#64748B' }}>Promedio Quizzes</p>
-          <p className="text-3xl" style={{ color: '#1E293B', fontWeight: 700 }}>
-            {Math.round(progress.average_score ?? 0)}%
-          </p>
-        </div>
-
-        <div className="bg-white rounded-xl p-6 border" style={{ borderColor: '#E2E8F0', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-          <div className="w-12 h-12 rounded-lg flex items-center justify-center mb-4" style={{ backgroundColor: '#FEF3C7' }}>
-            <Clock className="w-6 h-6" style={{ color: '#F59E0B' }} />
-          </div>
-          <p className="text-sm mb-1" style={{ color: '#64748B' }}>Tiempo de Estudio</p>
-          <p className="text-3xl" style={{ color: '#1E293B', fontWeight: 700 }}>
-            {fmtStudy(progress.study_time)}
-          </p>
-        </div>
-
-        <div className="bg-white rounded-xl p-6 border" style={{ borderColor: '#E2E8F0', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-          <div className="w-12 h-12 rounded-lg flex items-center justify-center mb-4" style={{ backgroundColor: '#E9D5FF' }}>
-            <Award className="w-6 h-6" style={{ color: '#8B5CF6' }} />
-          </div>
-          <p className="text-sm mb-1" style={{ color: '#64748B' }}>Medallas Obtenidas</p>
-          <p className="text-3xl" style={{ color: '#1E293B', fontWeight: 700 }}>
-            {Number(progress.medals_count ?? 0)}
-          </p>
-        </div>
+        <StatCard title="Progreso General" value={`${Math.round(progress.overall_progress ?? 0)}%`} icon={<Target />} color="#3B82F6" bg="#DBEAFE" />
+        <StatCard title="Promedio Quizzes" value={`${Math.round(progress.average_score ?? 0)}%`} icon={<TrendingUp />} color="#10B981" bg="#D1FAE5" />
+        <StatCard title="Tiempo de Estudio" value={fmtStudy(progress.study_time)} icon={<Clock />} color="#F59E0B" bg="#FEF3C7" />
+        <StatCard title="Medallas Obtenidas" value={String(progress.medals_count ?? 0)} icon={<Award />} color="#8B5CF6" bg="#E9D5FF" />
       </div>
 
+      {/* Gráfica y actividad */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-        {/* Progreso por semanas */}
-        <div className="lg:col-span-2 bg-white rounded-xl p-6 border" style={{ borderColor: '#E2E8F0', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-          <h3 className="mb-6" style={{ color: '#1E293B', fontSize: '1.5rem', fontWeight: 600 }}>
-            Tu Progreso (últimas 6 semanas)
-          </h3>
+        <div className="lg:col-span-2 bg-white rounded-xl p-6 border border-slate-200 shadow-sm">
+          <h3 className="text-xl font-semibold text-slate-800 mb-6">Tu progreso reciente</h3>
           <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={weeklyPoints.length ? weeklyPoints : [{ name: '—', puntos: 0 }]}>
+            <LineChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
               <XAxis dataKey="name" stroke="#64748B" />
               <YAxis stroke="#64748B" />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: '#FFFFFF',
-                  border: '1px solid #E2E8F0',
-                  borderRadius: '8px',
-                }}
-              />
+              <Tooltip />
               <Line type="monotone" dataKey="puntos" stroke="#3B82F6" strokeWidth={3} dot={{ fill: '#3B82F6', r: 5 }} />
             </LineChart>
           </ResponsiveContainer>
         </div>
 
-        {/* Actividad */}
-        <div className="bg-white rounded-xl p-6 border" style={{ borderColor: '#E2E8F0', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-          <h3 className="mb-6" style={{ color: '#1E293B', fontSize: '1.5rem', fontWeight: 600 }}>
-            Actividad Reciente
-          </h3>
+        <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm">
+          <h3 className="text-xl font-semibold text-slate-800 mb-6">Actividad Reciente</h3>
           <div className="space-y-4">
-            {recentActivity.length === 0 && (
-              <div className="text-sm text-slate-500">Sin actividad reciente aún.</div>
-            )}
-            {recentActivity.map((activity, index) => (
-              <div key={index} className="flex gap-3">
-                <div
-                  className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
-                  style={{
-                    backgroundColor:
-                      activity.type === 'medal' ? '#FEF3C7' :
-                      activity.type === 'quiz' ? '#D1FAE5' : '#DBEAFE',
-                  }}
-                >
-                  {activity.type === 'medal' ? (
-                    <Trophy className="w-5 h-5" style={{ color: '#F59E0B' }} />
-                  ) : activity.type === 'quiz' ? (
-                    <Star className="w-5 h-5" style={{ color: '#10B981' }} />
-                  ) : (
-                    <ChevronRight className="w-5 h-5" style={{ color: '#3B82F6' }} />
-                  )}
+            {recentActivity.length === 0 && <p className="text-slate-500 text-sm">Sin actividad reciente.</p>}
+            {recentActivity.map((a, i) => (
+              <div key={i} className="flex gap-3">
+                <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0" style={{
+                  backgroundColor: a.type === 'quiz' ? '#D1FAE5' :
+                    a.type === 'medal' ? '#FEF3C7' : '#DBEAFE'
+                }}>
+                  {a.type === 'quiz' ? <Star color="#10B981" /> :
+                    a.type === 'medal' ? <Trophy color="#F59E0B" /> :
+                      <ChevronRight color="#3B82F6" />}
                 </div>
-                <div className="flex-1">
-                  <p style={{ color: '#1E293B', fontWeight: 500 }}>{activity.action}</p>
-                  <p className="text-sm" style={{ color: '#64748B' }}>{activity.item ?? '—'}</p>
-                  <p className="text-xs mt-1" style={{ color: '#64748B' }}>{fmt(activity.created_at)}</p>
+                <div>
+                  <p className="font-medium text-slate-800">{a.action}</p>
+                  <p className="text-xs text-slate-500">{fmt(a.created_at)}</p>
                 </div>
               </div>
             ))}
@@ -361,46 +229,46 @@ export function Dashboard({ setActiveModule }: DashboardProps) {
         </div>
       </div>
 
+      {/* Quizzes y CTA */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Puntajes últimos quizzes */}
-        <div className="lg:col-span-2 bg-white rounded-xl p-6 border" style={{ borderColor: '#E2E8F0', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-          <h3 className="mb-6" style={{ color: '#1E293B', fontSize: '1.5rem', fontWeight: 600 }}>
-            Rendimiento en Quizzes
-          </h3>
+        <div className="lg:col-span-2 bg-white rounded-xl p-6 border border-slate-200 shadow-sm">
+          <h3 className="text-xl font-semibold text-slate-800 mb-6">Rendimiento en Quizzes</h3>
           <ResponsiveContainer width="100%" height={250}>
-            <BarChart data={quizScores.length ? quizScores : [{ name: '—', puntaje: 0 }]}>
+            <BarChart data={quizScores}>
               <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
               <XAxis dataKey="name" stroke="#64748B" />
               <YAxis stroke="#64748B" domain={[0, 100]} />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: '#FFFFFF',
-                  border: '1px solid #E2E8F0',
-                  borderRadius: '8px',
-                }}
-              />
+              <Tooltip />
               <Bar dataKey="puntaje" fill="#10B981" radius={[8, 8, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
 
-        {/* CTA */}
-        <div className="bg-white rounded-xl p-6 border" style={{ borderColor: '#E2E8F0', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-          <h3 className="mb-4" style={{ color: '#1E293B', fontSize: '1.5rem', fontWeight: 600 }}>
-            Sigue aprendiendo
-          </h3>
-          <p className="mb-6" style={{ color: '#64748B' }}>
-            Practica y desbloquea más logros.
-          </p>
+        <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm">
+          <h3 className="text-xl font-semibold text-slate-800 mb-4">Sigue aprendiendo</h3>
+          <p className="text-slate-500 mb-6">Practica y desbloquea más logros.</p>
           <button
             onClick={() => setActiveModule('aprende')}
-            className="px-6 py-3 rounded-lg transition-transform hover:scale-105"
-            style={{ backgroundColor: '#3B82F6', color: '#FFFFFF', fontWeight: 600 }}
+            className="px-6 py-3 rounded-lg font-semibold text-white transition-transform hover:scale-105"
+            style={{ backgroundColor: '#3B82F6' }}
           >
             Continuar Lección
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** 🔹 Componente auxiliar para tarjetas */
+function StatCard({ title, value, icon, color, bg }: { title: string; value: string; icon: React.ReactNode; color: string; bg: string }) {
+  return (
+    <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm">
+      <div className="w-12 h-12 rounded-lg flex items-center justify-center mb-4" style={{ backgroundColor: bg }}>
+        {React.cloneElement(icon as any, { color, size: 24 })}
+      </div>
+      <p className="text-sm text-slate-500 mb-1">{title}</p>
+      <p className="text-3xl font-bold text-slate-800">{value}</p>
     </div>
   );
 }
