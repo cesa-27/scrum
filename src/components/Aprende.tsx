@@ -1,16 +1,15 @@
-import React, { useState } from 'react';
+// Aprende.tsx
+import React, { useState, useEffect } from "react";
 import {
   BookOpen,
   Users,
-  Calendar,
-  Package,
   CheckCircle,
   ChevronRight,
   Play,
   FileText,
   ArrowLeft,
-} from 'lucide-react';
-import { supabase } from '../lib/supabase';
+} from "lucide-react";
+import { supabase } from "../lib/supabase";
 
 interface AprendeProps {
   completedLessons: string[];
@@ -21,65 +20,138 @@ export function Aprende({ completedLessons, onCompleteLesson }: AprendeProps) {
   const [selectedLesson, setSelectedLesson] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [listening, setListening] = useState(false);
+  const [recognizedText, setRecognizedText] = useState("");
+  const [isSpeaking, setIsSpeaking] = useState(false);
 
+  // 🔊 Lector de voz
+  const speak = (text: string) => {
+    if (!text) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = "es-MX"; // español mexicano
+    utterance.rate = 1;
+    utterance.pitch = 1;
+    utterance.onend = () => setIsSpeaking(false);
+    window.speechSynthesis.speak(utterance);
+    setIsSpeaking(true);
+  };
+
+  const stopSpeaking = () => {
+    window.speechSynthesis.cancel();
+    setIsSpeaking(false);
+  };
+
+  // 🎙️ Control por voz
+  useEffect(() => {
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      console.warn("El reconocimiento de voz no está disponible en este navegador.");
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = "es-ES";
+    recognition.continuous = true;
+    recognition.interimResults = false;
+
+    recognition.onresult = (event: any) => {
+      const last = event.results.length - 1;
+      const text = event.results[last][0].transcript.trim().toLowerCase();
+      setRecognizedText(text);
+      handleVoiceCommand(text);
+    };
+
+    if (listening) recognition.start();
+    else recognition.stop();
+
+    return () => recognition.stop();
+  }, [listening]);
+
+  // 🧠 Interpretar comandos de voz
+  const handleVoiceCommand = (command: string) => {
+    console.log("Comando de voz:", command);
+
+    if (command.includes("abrir fundamentos")) setSelectedLesson("fundamentos-1");
+    else if (command.includes("abrir tradicional")) setSelectedLesson("fundamentos-2");
+    else if (command.includes("abrir scrum")) setSelectedLesson("scrum-1");
+    else if (command.includes("volver") || command.includes("regresar")) setSelectedLesson(null);
+    else if (command.includes("completar") || command.includes("terminar")) {
+      if (selectedLesson) handleCompleteLesson(selectedLesson);
+    }
+    else if (command.includes("reproducir") || command.includes("play")) {
+      const iframe = document.querySelector("iframe");
+      if (iframe) {
+        const src = iframe.getAttribute("src");
+        if (src && !src.includes("autoplay=1")) {
+          iframe.setAttribute("src", src + "?autoplay=1");
+        }
+      }
+    }
+    else if (command.includes("leer")) {
+      const text = document.body.innerText;
+      speak(text);
+    }
+    else if (command.includes("detener lectura")) {
+      stopSpeaking();
+    }
+  };
+
+  // 📘 Lecciones
   const sections = [
     {
-      id: 'fundamentos',
-      title: 'Fundamentos Ágiles',
-      description: 'Comprende los principios y valores que sustentan las metodologías ágiles',
+      id: "fundamentos",
+      title: "Fundamentos Ágiles",
+      description:
+        "Aprende el origen, los valores, los principios y la evolución del pensamiento ágil.",
       icon: BookOpen,
-      color: '#3B82F6',
+      color: "#3B82F6",
       lessons: [
         {
-          id: 'fundamentos-1',
-          title: '¿Qué es Agile?',
-          duration: '15 min',
+          id: "fundamentos-1",
+          title: "¿Qué es Agile?",
+          videoUrl: "https://www.youtube.com/embed/xlmEwPHeO4k",
           content: {
-            intro: 'Agile es un conjunto de valores y principios para el desarrollo de software que enfatiza la flexibilidad, la colaboración y la entrega continua de valor.',
+            intro:
+              "Agile es una filosofía de trabajo que prioriza la adaptabilidad, la colaboración y la entrega continua de valor.",
             sections: [
               {
-                subtitle: 'Origen del Movimiento Ágil',
-                text: 'En 2001, 17 desarrolladores de software se reunieron en Snowbird, Utah, para discutir métodos de desarrollo más ligeros. De esta reunión surgió el Manifiesto Ágil.',
+                subtitle: "Origen del Movimiento Ágil",
+                text: `En los años 90, los equipos de software se enfrentaban a grandes retrasos y sobrecostos. En 2001, diecisiete desarrolladores crearon el Manifiesto Ágil en Snowbird, Utah.`,
               },
               {
-                subtitle: 'Los 4 Valores del Manifiesto Ágil',
+                subtitle: "Los 4 Valores del Manifiesto Ágil",
                 points: [
-                  'Individuos e interacciones sobre procesos y herramientas',
-                  'Software funcionando sobre documentación extensiva',
-                  'Colaboración con el cliente sobre negociación contractual',
-                  'Respuesta ante el cambio sobre seguir un plan',
+                  "Individuos e interacciones sobre procesos y herramientas.",
+                  "Software funcionando sobre documentación extensiva.",
+                  "Colaboración con el cliente sobre negociación contractual.",
+                  "Respuesta ante el cambio sobre seguir un plan.",
                 ],
               },
               {
-                subtitle: '12 Principios Clave',
-                text: 'Los principios ágiles incluyen: satisfacer al cliente mediante entregas tempranas y continuas, aceptar cambios en cualquier etapa, entregar software frecuentemente, colaboración diaria entre negocio y desarrollo, construir proyectos alrededor de individuos motivados, entre otros.',
+                subtitle: "Agile Hoy",
+                text: "Hoy Agile está presente en empresas de todo tipo. Su enfoque adaptable permite responder al cambio en entornos complejos.",
               },
             ],
           },
         },
         {
-          id: 'fundamentos-2',
-          title: 'Ágil vs Tradicional',
-          duration: '12 min',
+          id: "fundamentos-2",
+          title: "Ágil vs Tradicional",
+          videoUrl: "https://www.youtube.com/embed/JpSMlo7uZ_s",
           content: {
-            intro: 'Comprender las diferencias fundamentales entre metodologías ágiles y tradicionales es clave para elegir el enfoque correcto.',
+            intro:
+              "Comprender las diferencias entre los métodos tradicionales y los ágiles es esencial para aplicar la estrategia correcta.",
             sections: [
               {
-                subtitle: 'Metodología en Cascada (Tradicional)',
-                text: 'Enfoque secuencial donde cada fase debe completarse antes de iniciar la siguiente: Requisitos → Diseño → Desarrollo → Pruebas → Despliegue. Es rígido y poco flexible al cambio.',
+                subtitle: "Metodología Tradicional (Cascada)",
+                text: "El modelo en cascada sigue una secuencia rígida: requisitos → diseño → desarrollo → pruebas → entrega.",
               },
               {
-                subtitle: 'Metodología Ágil',
-                text: 'Enfoque iterativo e incremental. El trabajo se divide en ciclos cortos (sprints) que producen incrementos funcionales del producto. Permite adaptación continua.',
-              },
-              {
-                subtitle: 'Comparación Clave',
-                points: [
-                  'Planificación: Cascada (completa al inicio) vs Ágil (continua)',
-                  'Cambios: Cascada (costosos) vs Ágil (bienvenidos)',
-                  'Entregas: Cascada (al final) vs Ágil (frecuentes)',
-                  'Riesgo: Cascada (alto al final) vs Ágil (distribuido)',
-                ],
+                subtitle: "Metodología Ágil",
+                text: "El enfoque ágil divide el trabajo en iteraciones cortas llamadas sprints. Cada sprint produce un incremento funcional.",
               },
             ],
           },
@@ -87,51 +159,32 @@ export function Aprende({ completedLessons, onCompleteLesson }: AprendeProps) {
       ],
     },
     {
-      id: 'scrum',
-      title: 'Scrum',
-      description: 'Domina el framework ágil más popular del mundo',
+      id: "scrum",
+      title: "Scrum",
+      description:
+        "Descubre cómo Scrum estructura el trabajo en equipo a través de roles, eventos y artefactos.",
       icon: Users,
-      color: '#10B981',
+      color: "#10B981",
       lessons: [
         {
-          id: 'scrum-1',
-          title: 'Roles en Scrum',
-          duration: '20 min',
+          id: "scrum-1",
+          title: "Roles en Scrum",
+          videoUrl: "https://www.youtube.com/embed/Q5k7a9YEoUI",
           content: {
-            intro: 'Scrum define tres roles principales, cada uno con responsabilidades específicas y complementarias.',
+            intro:
+              "Scrum se basa en tres roles principales que garantizan la transparencia, la inspección y la adaptación dentro del proceso ágil.",
             sections: [
               {
-                subtitle: 'Product Owner (PO)',
-                text: 'El PO es el responsable de maximizar el valor del producto. Define el "qué" se debe construir.',
-                points: [
-                  'Gestiona el Product Backlog (priorización)',
-                  'Define criterios de aceptación',
-                  'Toma decisiones sobre el producto',
-                  'Representa a los stakeholders',
-                  'Acepta o rechaza el trabajo completado',
-                ],
+                subtitle: "Product Owner",
+                text: "El Product Owner maximiza el valor del producto y gestiona el Product Backlog.",
               },
               {
-                subtitle: 'Scrum Master (SM)',
-                text: 'El SM es el facilitador del proceso Scrum. Protege al equipo y asegura que se sigan las prácticas ágiles.',
-                points: [
-                  'Facilita eventos Scrum',
-                  'Elimina impedimentos',
-                  'Coaching al equipo y la organización',
-                  'Protege al equipo de interrupciones',
-                  'Promueve la mejora continua',
-                ],
+                subtitle: "Scrum Master",
+                text: "El Scrum Master guía al equipo en la adopción de Scrum. Es un líder servicial que elimina impedimentos y fomenta la mejora continua.",
               },
               {
-                subtitle: 'Development Team (Equipo de Desarrollo)',
-                text: 'Profesionales que realizan el trabajo de entregar el incremento del producto.',
-                points: [
-                  'Autoorganizados y multifuncionales',
-                  'Tamaño ideal: 3-9 personas',
-                  'Comprometidos con el Sprint Goal',
-                  'Responsables de la calidad',
-                  'Estiman su propio trabajo',
-                ],
+                subtitle: "Development Team",
+                text: "Profesionales que realizan el trabajo de entregar el incremento del producto. Son autoorganizados y multifuncionales.",
               },
             ],
           },
@@ -140,17 +193,20 @@ export function Aprende({ completedLessons, onCompleteLesson }: AprendeProps) {
     },
   ];
 
-  // Guardar en Supabase cuando se completa
+  // Guardar progreso
   const handleCompleteLesson = async (lessonId: string) => {
     setLoading(true);
     setErrorMsg(null);
     try {
-      const { data: { user }, error: authErr } = await supabase.auth.getUser();
+      const {
+        data: { user },
+        error: authErr,
+      } = await supabase.auth.getUser();
       if (authErr) throw authErr;
-      if (!user) throw new Error('No autenticado');
+      if (!user) throw new Error("No autenticado");
 
       const { error } = await supabase
-        .from('user_lessons')
+        .from("user_lessons")
         .upsert(
           {
             user_id: user.id,
@@ -158,23 +214,23 @@ export function Aprende({ completedLessons, onCompleteLesson }: AprendeProps) {
             completed: true,
             completed_at: new Date().toISOString(),
           },
-          { onConflict: 'user_id,lesson_id' }
+          { onConflict: "user_id,lesson_id" }
         );
 
       if (error) throw error;
       onCompleteLesson(lessonId);
     } catch (e: any) {
-      setErrorMsg(e.message || 'Error guardando lección');
+      setErrorMsg(e.message || "Error guardando lección");
     } finally {
       setLoading(false);
       setSelectedLesson(null);
     }
   };
 
+  // Vista de lección
   if (selectedLesson) {
     let currentLesson: any = null;
-    let sectionColor = '#3B82F6';
-
+    let sectionColor = "#3B82F6";
     for (const section of sections) {
       const lesson = section.lessons.find((l) => l.id === selectedLesson);
       if (lesson) {
@@ -183,25 +239,42 @@ export function Aprende({ completedLessons, onCompleteLesson }: AprendeProps) {
         break;
       }
     }
-
     if (!currentLesson) return null;
 
     return (
       <div className="min-h-screen bg-gray-50">
         <div className="container mx-auto px-4 py-8 max-w-4xl">
-          <button
-            onClick={() => setSelectedLesson(null)}
-            className="flex items-center gap-2 mb-6 px-4 py-2 rounded-lg border hover:bg-gray-100"
-          >
-            <ArrowLeft className="w-5 h-5" />
-            Volver a Lecciones
-          </button>
+          {/* Botones de voz */}
+          <div className="flex justify-between mb-4">
+            <button
+              onClick={() => setSelectedLesson(null)}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg border hover:bg-gray-100"
+            >
+              <ArrowLeft className="w-5 h-5" />
+              Volver
+            </button>
+
+            <button
+              onClick={() => setListening(!listening)}
+              className={`px-4 py-2 rounded-lg text-white font-semibold ${
+                listening ? "bg-red-500" : "bg-blue-600"
+              }`}
+            >
+              {listening ? "🎙️ Detener voz" : "🎧 Activar voz"}
+            </button>
+          </div>
+
+          {recognizedText && (
+            <p className="text-sm text-gray-500 italic mb-3">
+              Escuchando: “{recognizedText}”
+            </p>
+          )}
 
           <div className="bg-white rounded-xl p-8 border shadow-sm">
             <div className="flex items-center gap-3 mb-4">
               <div
                 className="w-12 h-12 rounded-lg flex items-center justify-center"
-                style={{ backgroundColor: sectionColor + '20' }}
+                style={{ backgroundColor: sectionColor + "20" }}
               >
                 <Play className="w-6 h-6" style={{ color: sectionColor }} />
               </div>
@@ -209,17 +282,49 @@ export function Aprende({ completedLessons, onCompleteLesson }: AprendeProps) {
                 <h1 className="text-2xl font-bold text-slate-800">
                   {currentLesson.title}
                 </h1>
-                <p className="text-sm text-slate-500">
-                  Duración estimada: {currentLesson.duration}
-                </p>
               </div>
+            </div>
+
+            {currentLesson.videoUrl && (
+              <div className="mt-6 mb-8">
+                <iframe
+                  className="w-full rounded-xl shadow-md"
+                  height="400"
+                  src={currentLesson.videoUrl}
+                  title="Video de lección"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                ></iframe>
+              </div>
+            )}
+
+            {/* Botón de lectura */}
+            <div className="flex gap-3 mb-6">
+              <button
+                onClick={() => {
+                  if (!isSpeaking) {
+                    let fullText = currentLesson.content.intro;
+                    currentLesson.content.sections.forEach((section: any) => {
+                      fullText += " " + section.subtitle + ". ";
+                      if (section.text) fullText += section.text + " ";
+                      if (section.points)
+                        fullText += section.points.join(". ") + ". ";
+                    });
+                    speak(fullText);
+                  } else stopSpeaking();
+                }}
+                className={`px-5 py-2 rounded-lg text-white font-semibold shadow transition-all ${
+                  isSpeaking ? "bg-red-500" : "bg-green-600"
+                }`}
+              >
+                {isSpeaking ? "🛑 Detener lectura" : "🔊 Leer lección"}
+              </button>
             </div>
 
             <div className="mt-8 space-y-8">
               <p className="text-lg leading-relaxed text-slate-800">
                 {currentLesson.content.intro}
               </p>
-
               {currentLesson.content.sections.map((section: any, i: number) => (
                 <div key={i}>
                   <h3 className="text-xl font-semibold mb-3 text-slate-800">
@@ -258,7 +363,7 @@ export function Aprende({ completedLessons, onCompleteLesson }: AprendeProps) {
                   className="px-6 py-3 rounded-lg text-white font-semibold"
                   style={{ backgroundColor: sectionColor }}
                 >
-                  {loading ? 'Guardando...' : 'Marcar como Completada'}
+                  {loading ? "Guardando..." : "Marcar como completada"}
                 </button>
               )}
             </div>
@@ -272,12 +377,13 @@ export function Aprende({ completedLessons, onCompleteLesson }: AprendeProps) {
     );
   }
 
+  // Vista general
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="container mx-auto px-4 py-8">
         <h1 className="text-3xl font-bold text-slate-800 mb-2">Aprende</h1>
         <p className="text-slate-600 mb-8">
-          Explora lecciones interactivas sobre metodologías ágiles
+          Explora lecciones interactivas con control por voz y narración en español.
         </p>
 
         <div className="space-y-8">
@@ -296,7 +402,7 @@ export function Aprende({ completedLessons, onCompleteLesson }: AprendeProps) {
                 <div className="flex items-start gap-4 mb-4">
                   <div
                     className="w-14 h-14 rounded-lg flex items-center justify-center"
-                    style={{ backgroundColor: section.color + '20' }}
+                    style={{ backgroundColor: section.color + "20" }}
                   >
                     <Icon className="w-7 h-7" style={{ color: section.color }} />
                   </div>
@@ -304,12 +410,17 @@ export function Aprende({ completedLessons, onCompleteLesson }: AprendeProps) {
                     <h2 className="text-xl font-semibold text-slate-800">
                       {section.title}
                     </h2>
-                    <p className="text-slate-600 mb-2">{section.description}</p>
+                    <p className="text-slate-600 mb-2">
+                      {section.description}
+                    </p>
                     <div className="flex items-center gap-3">
                       <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
                         <div
                           className="h-full rounded-full transition-all"
-                          style={{ width: `${progress}%`, backgroundColor: section.color }}
+                          style={{
+                            width: `${progress}%`,
+                            backgroundColor: section.color,
+                          }}
                         />
                       </div>
                       <span className="text-sm text-slate-600 font-semibold">
@@ -327,7 +438,7 @@ export function Aprende({ completedLessons, onCompleteLesson }: AprendeProps) {
                         key={lesson.id}
                         onClick={() => setSelectedLesson(lesson.id)}
                         className={`text-left p-4 rounded-lg border hover:shadow-md transition-all ${
-                          done ? 'bg-gray-50' : 'bg-white'
+                          done ? "bg-gray-50" : "bg-white"
                         }`}
                       >
                         <div className="flex items-start justify-between gap-2 mb-2">
@@ -341,7 +452,7 @@ export function Aprende({ completedLessons, onCompleteLesson }: AprendeProps) {
                         <div className="flex justify-between items-center text-sm text-slate-500">
                           <div className="flex items-center gap-1">
                             <FileText className="w-4 h-4" />
-                            {lesson.duration}
+                            Lección
                           </div>
                           <ChevronRight
                             className="w-5 h-5"
