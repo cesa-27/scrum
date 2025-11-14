@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { BookOpen, Trophy, GraduationCap, Library, LogOut } from 'lucide-react';
-import { supabase } from '../lib/supabase'; // 👈 asegúrate de tener este archivo creado
+import { supabase } from '../lib/supabase';
 
 interface HeaderProps {
   activeModule: string;
@@ -12,22 +12,18 @@ export function Header({ activeModule, setActiveModule, onLogout }: HeaderProps)
   const [points, setPoints] = useState<number | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
-  // 🔄 Cargar los puntos del usuario logueado desde Supabase
   useEffect(() => {
     (async () => {
       try {
         setLoading(true);
 
-        // 🧩 Obtener el usuario actual
         const { data: { user }, error: authError } = await supabase.auth.getUser();
         if (authError || !user) {
-          console.warn('⚠️ No hay usuario autenticado');
           setPoints(0);
           setLoading(false);
           return;
         }
 
-        // 🔍 Consultar los puntos desde la tabla user_progress
         const { data, error } = await supabase
           .from('user_progress')
           .select('total_points')
@@ -46,7 +42,6 @@ export function Header({ activeModule, setActiveModule, onLogout }: HeaderProps)
     })();
   }, []);
 
-  // 🧭 Menú de navegación
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: Trophy },
     { id: 'aprende', label: 'Aprende', icon: BookOpen },
@@ -57,9 +52,10 @@ export function Header({ activeModule, setActiveModule, onLogout }: HeaderProps)
   return (
     <header className="bg-white border-b" style={{ borderColor: '#E2E8F0' }}>
       <div className="container mx-auto px-4">
-        {/* --- Barra principal --- */}
+
         <div className="flex items-center justify-between py-4">
-          {/* 🔹 Logo */}
+
+          {/* LOGO */}
           <div className="flex items-center gap-2">
             <div
               className="w-10 h-10 rounded-lg flex items-center justify-center"
@@ -72,13 +68,18 @@ export function Header({ activeModule, setActiveModule, onLogout }: HeaderProps)
             </h1>
           </div>
 
-          {/* 🔹 Navegación Desktop */}
-          <nav className="hidden md:flex items-center gap-1">
+          {/* ⭐ NAV DESKTOP (CON IDs PARA EL TOUR) */}
+          <nav
+            id="navbar-main"
+            className="hidden md:flex items-center gap-1"
+          >
             {navItems.map((item) => {
               const Icon = item.icon;
               const isActive = activeModule === item.id;
+
               return (
                 <button
+                  id={`nav-${item.id}`} // ← ⭐ ID para cada pestaña
                   key={item.id}
                   onClick={() => setActiveModule(item.id)}
                   className="flex items-center gap-2 px-4 py-2 rounded-lg transition-colors"
@@ -95,9 +96,8 @@ export function Header({ activeModule, setActiveModule, onLogout }: HeaderProps)
             })}
           </nav>
 
-          {/* 🔹 Puntos y Logout */}
+          {/* PUNTOS + LOGOUT */}
           <div className="flex items-center gap-2">
-            {/* 🏆 Puntos del usuario */}
             <div
               className="flex items-center gap-2 px-3 py-2 rounded-lg"
               style={{ backgroundColor: '#F1F5F9' }}
@@ -108,7 +108,6 @@ export function Header({ activeModule, setActiveModule, onLogout }: HeaderProps)
               </span>
             </div>
 
-            {/* 🔴 Botón de salir */}
             {onLogout && (
               <button
                 onClick={onLogout}
@@ -123,13 +122,15 @@ export function Header({ activeModule, setActiveModule, onLogout }: HeaderProps)
           </div>
         </div>
 
-        {/* --- Navegación móvil --- */}
+        {/* NAV MOBILE */}
         <nav className="md:hidden flex gap-1 pb-3 overflow-x-auto">
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeModule === item.id;
+
             return (
               <button
+                id={`nav-mobile-${item.id}`} // ← ⭐ IDs también para móviles
                 key={item.id}
                 onClick={() => setActiveModule(item.id)}
                 className="flex items-center gap-2 px-3 py-2 rounded-lg transition-colors whitespace-nowrap"
@@ -145,6 +146,7 @@ export function Header({ activeModule, setActiveModule, onLogout }: HeaderProps)
             );
           })}
         </nav>
+
       </div>
     </header>
   );
